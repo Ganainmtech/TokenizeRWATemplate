@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.vscode/**'
+      - '.idea/**'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  TokenizeRWATemplate-contracts-validate:
+    name: Run TokenizeRWATemplate-contracts release
+    secrets: inherit
+    uses: ./.github/workflows/TokenizeRWATemplate-contracts-ci.yaml
+
+  TokenizeRWATemplate-contracts-release:
+    name: Run TokenizeRWATemplate-contracts release
+    secrets: inherit
+    uses: ./.github/workflows/TokenizeRWATemplate-contracts-cd.yaml
+    needs: TokenizeRWATemplate-contracts-validate
+
+  TokenizeRWATemplate-frontend-validate:
+    name: Run TokenizeRWATemplate-frontend release
+    secrets: inherit
+    uses: ./.github/workflows/TokenizeRWATemplate-frontend-ci.yaml
+
+  TokenizeRWATemplate-frontend-release:
+    name: Run TokenizeRWATemplate-frontend release
+    secrets: inherit
+    uses: ./.github/workflows/TokenizeRWATemplate-frontend-cd.yaml
+    needs: TokenizeRWATemplate-frontend-validate
