@@ -40,7 +40,7 @@ export default function Home() {
               className="px-8 py-3 border-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg font-semibold hover:border-slate-400 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
               target="_blank"
               rel="noreferrer"
-              href="https://developer.algorand.org/docs/get-details/asa/"
+              href="https://dev.algorand.co/concepts/assets/overview/"
             >
               Learn about ASAs
             </a>
