@@ -72,6 +72,12 @@ export default function TokenizeAsset() {
   const [loading, setLoading] = useState<boolean>(false)
   const [createdAssets, setCreatedAssets] = useState<CreatedAsset[]>([])
 
+  // NEW: Transfer state (added)
+  const [transferAssetId, setTransferAssetId] = useState<string>('')
+  const [receiverAddress, setReceiverAddress] = useState<string>('')
+  const [transferAmount, setTransferAmount] = useState<string>('1')
+  const [transferLoading, setTransferLoading] = useState<boolean>(false)
+
   const { transactionSigner, activeAddress } = useWallet()
   const { enqueueSnackbar } = useSnackbar()
 
@@ -86,6 +92,13 @@ export default function TokenizeAsset() {
     if (activeAddress && !manager) setManager(activeAddress)
   }, [activeAddress, manager])
 
+  // NEW: Prefill transfer asset id from latest created asset (optional QoL)
+  useEffect(() => {
+    if (!transferAssetId && createdAssets.length > 0) {
+      setTransferAssetId(String(createdAssets[0].assetId))
+    }
+  }, [createdAssets, transferAssetId])
+
   const resetDefaults = () => {
     setAssetName('Tokenized Coffee Membership')
     setUnitName('COFFEE')
@@ -97,6 +110,18 @@ export default function TokenizeAsset() {
     setReserve('')
     setFreeze('')
     setClawback('')
+  }
+
+  // NEW: Copy helper (added)
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      enqueueSnackbar('Asset ID copied to clipboard', { variant: 'success' })
+      // Also fill transfer field to reduce friction
+      setTransferAssetId(text)
+    } catch {
+      enqueueSnackbar('Copy failed. Please copy manually.', { variant: 'warning' })
+    }
   }
 
   const isWholeNumber = (v: string) => /^\d+$/.test(v)
@@ -157,8 +182,8 @@ export default function TokenizeAsset() {
         assetId: Number(assetId),
         assetName: String(assetName),
         unitName: String(unitName),
-        total: String(total), // human total as string
-        decimals: String(decimals), // decimals as string
+        total: String(total),
+        decimals: String(decimals),
         url: url ? String(url) : undefined,
         manager: manager ? String(manager) : undefined,
         reserve: reserve ? String(reserve) : undefined,
@@ -194,10 +219,73 @@ export default function TokenizeAsset() {
     }
   }
 
+    const handleTransferAsset = async () => {
+    if (!transactionSigner || !activeAddress) {
+      enqueueSnackbar('Please connect your wallet first.', { variant: 'warning' })
+      return
+    }
+
+    if (!transferAssetId || !isWholeNumber(transferAssetId)) {
+      enqueueSnackbar('Please enter a valid Asset ID (number).', { variant: 'warning' })
+      return
+    }
+
+    if (!receiverAddress) {
+      enqueueSnackbar('Please enter a recipient address.', { variant: 'warning' })
+      return
+    }
+
+    if (!transferAmount || !isWholeNumber(transferAmount)) {
+      enqueueSnackbar('Amount must be a whole number.', { variant: 'warning' })
+      return
+    }
+
+    try {
+      setTransferLoading(true)
+      enqueueSnackbar('Transferring asset...', { variant: 'info' })
+
+      const result = await algorand.send.assetTransfer({
+        sender: activeAddress,
+        signer: transactionSigner,
+        assetId: Number(transferAssetId),
+        receiver: receiverAddress,
+        amount: BigInt(transferAmount),
+      })
+
+      // AlgoKit commonly returns txId here
+      const txId = (result as { txId?: string }).txId
+
+      enqueueSnackbar('✅ Transfer complete!', {
+        variant: 'success',
+        action: () =>
+          txId ? (
+            <a
+              href={`${LORA_BASE}/transaction/${txId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'underline', marginLeft: 8 }}
+            >
+              View Tx on Lora ↗
+            </a>
+          ) : null,
+      })
+
+      setReceiverAddress('')
+      setTransferAmount('1')
+    } catch (error) {
+      console.error(error)
+      enqueueSnackbar('Transfer failed. Make sure the recipient has opted in.', { variant: 'error' })
+    } finally {
+      setTransferLoading(false)
+    }
+  }
+
+
   const canSubmit = !!assetName && !!unitName && !!total && !loading && !!activeAddress
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg p-6 sm:p-8">
+      {/* ===== ORIGINAL TOKENIZE FORM (UNCHANGED) ===== */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-teal-100 dark:bg-teal-900/30">
@@ -305,6 +393,7 @@ export default function TokenizeAsset() {
             <span>{showAdvanced ? 'Hide advanced options' : 'Show advanced options'}</span>
             <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
           </button>
+
           {showAdvanced && (
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5">
               {[
@@ -363,7 +452,11 @@ export default function TokenizeAsset() {
         <div className="mt-8 flex flex-col sm:flex-row gap-3 sm:justify-end">
           <button
             type="button"
-            className={`px-6 py-3 rounded-lg font-semibold transition ${canSubmit ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-md' : 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'}`}
+            className={`px-6 py-3 rounded-lg font-semibold transition ${
+              canSubmit
+                ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
+                : 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'
+            }`}
             onClick={handleTokenize}
             disabled={!canSubmit}
           >
@@ -378,6 +471,7 @@ export default function TokenizeAsset() {
           </button>
         </div>
 
+        {/* ===== MY CREATED ASSETS  ===== */}
         <div className="mt-10">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">My Created Assets</h3>
@@ -419,7 +513,22 @@ export default function TokenizeAsset() {
                       onClick={() => window.open(`${LORA_BASE}/asset/${a.assetId}`, '_blank', 'noopener,noreferrer')}
                       title="Open in Lora explorer"
                     >
-                      <td className="font-mono text-xs px-4 py-3 text-slate-700 dark:text-slate-300">{a.assetId}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-slate-700 dark:text-slate-300">{a.assetId}</span>
+                          <button
+                            type="button"
+                            className="px-2 py-1 text-[11px] rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              copyToClipboard(String(a.assetId))
+                            }}
+                            title="Copy Asset ID"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-slate-900 dark:text-white">{a.assetName}</td>
                       <td className="font-mono px-4 py-3 text-slate-700 dark:text-slate-300">{a.unitName}</td>
                       <td className="font-mono px-4 py-3 text-slate-700 dark:text-slate-300">{a.total}</td>
@@ -434,6 +543,69 @@ export default function TokenizeAsset() {
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
             <AiOutlineInfoCircle />
             This list is stored locally in your browser (localStorage) to keep the template simple.
+          </p>
+        </div>
+
+        {/* ===== TRANSFER ASSET ===== */}
+        <div className="mt-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg p-6 sm:p-8">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Transfer Asset</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+            Send units of an Algorand Standard Asset (ASA) to another wallet.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Asset ID</label>
+              <input
+                type="text"
+                className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                placeholder="e.g. 123456789"
+                value={transferAssetId}
+                onChange={(e) => setTransferAssetId(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Recipient Address</label>
+              <input
+                type="text"
+                className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                placeholder="Wallet address"
+                value={receiverAddress}
+                onChange={(e) => setReceiverAddress(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Amount</label>
+              <input
+                type="number"
+                min={1}
+                className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end">
+            <button
+              type="button"
+              onClick={handleTransferAsset}
+              disabled={transferLoading || !activeAddress}
+              className={`px-6 py-3 rounded-lg font-semibold transition ${
+                transferLoading || !activeAddress
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'
+                  : 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
+              }`}
+            >
+              {transferLoading ? 'Transferring…' : 'Transfer Asset'}
+            </button>
+          </div>
+
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+            <AiOutlineInfoCircle />
+            The recipient must opt-in to the asset before receiving it.
           </p>
         </div>
       </div>

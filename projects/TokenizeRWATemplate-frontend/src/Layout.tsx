@@ -84,7 +84,7 @@ export default function Layout() {
                 <li>
                   <a
                     className="hover:text-white transition"
-                    href="https://developer.algorand.org/docs/get-details/asa/"
+                    href="https://dev.algorand.co/concepts/assets/overview/"
                     target="_blank"
                     rel="noreferrer"
                   >
