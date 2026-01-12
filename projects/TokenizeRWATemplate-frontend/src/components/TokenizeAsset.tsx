@@ -28,6 +28,13 @@ type CreatedAsset = {
 const STORAGE_KEY = 'tokenize_assets'
 const LORA_BASE = 'https://lora.algokit.io/testnet'
 
+// Circle USDC on Algorand TestNet (ASA)
+const TESTNET_USDC_ASSET_ID = 10458941
+const USDC_DECIMALS = 6
+const ALGO_DECIMALS = 6
+
+type TransferMode = 'manual' | 'algo' | 'usdc'
+
 function resolveBackendBase(): string {
   // 1) Respect explicit env (Vercel or custom)
   const env = import.meta.env.VITE_API_URL?.trim()
@@ -69,6 +76,32 @@ function persistAsset(asset: CreatedAsset): CreatedAsset[] {
 }
 
 /**
+ * Convert a decimal string (e.g. "1.23") into base units bigint given decimals.
+ * - Supports up to `decimals` fractional digits.
+ * - Rejects negatives and invalid formats.
+ */
+function decimalToBaseUnits(value: string, decimals: number): bigint {
+  const v = value.trim()
+  if (!v) throw new Error('Amount is required')
+
+  // Allow: "1", "1.", "1.0", ".5" ? We'll keep it simple: must start with digit.
+  // (Users can type 0.5)
+  if (!/^\d+(\.\d+)?$/.test(v)) throw new Error('Invalid amount format')
+
+  const [wholeRaw, fracRaw = ''] = v.split('.')
+  const whole = wholeRaw || '0'
+  const frac = fracRaw || ''
+
+  if (frac.length > decimals) {
+    throw new Error(`Too many decimal places (max ${decimals})`)
+  }
+
+  const fracPadded = frac.padEnd(decimals, '0')
+  const combined = `${whole}${fracPadded}`.replace(/^0+(?=\d)/, '') // keep at least one digit
+  return BigInt(combined || '0')
+}
+
+/**
  * TokenizeAsset Component
  * Main form for creating Algorand Standard Assets (ASAs)
  * + NFT minting panel (ASA mint with IPFS metadata)
@@ -92,6 +125,7 @@ export default function TokenizeAsset() {
   const [createdAssets, setCreatedAssets] = useState<CreatedAsset[]>([])
 
   // ===== Transfer state =====
+  const [transferMode, setTransferMode] = useState<TransferMode>('manual')
   const [transferAssetId, setTransferAssetId] = useState<string>('')
   const [receiverAddress, setReceiverAddress] = useState<string>('')
   const [transferAmount, setTransferAmount] = useState<string>('1')
@@ -138,12 +172,32 @@ export default function TokenizeAsset() {
     if (activeAddress && !nftManager) setNftManager(activeAddress)
   }, [activeAddress, nftManager])
 
-  // Prefill transfer asset id from latest created asset (QoL)
+  // Prefill transfer asset id from latest created asset (QoL) — only in manual mode
   useEffect(() => {
+    if (transferMode !== 'manual') return
     if (!transferAssetId && createdAssets.length > 0) {
       setTransferAssetId(String(createdAssets[0].assetId))
     }
-  }, [createdAssets, transferAssetId])
+  }, [createdAssets, transferAssetId, transferMode])
+
+  // When switching transfer mode, set the asset id display/value accordingly
+  useEffect(() => {
+    if (transferMode === 'algo') {
+      setTransferAssetId('ALGO')
+    } else if (transferMode === 'usdc') {
+      setTransferAssetId(String(TESTNET_USDC_ASSET_ID))
+    } else {
+      // manual: keep whatever the user had, but if it was ALGO then clear
+      if (transferAssetId === 'ALGO' || transferAssetId === String(TESTNET_USDC_ASSET_ID)) {
+        setTransferAssetId('')
+      }
+      // If we have history, prefill from latest
+      if (!transferAssetId && createdAssets.length > 0) {
+        setTransferAssetId(String(createdAssets[0].assetId))
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transferMode])
 
   const resetDefaults = () => {
     setAssetName('Tokenized Coffee Membership')
@@ -182,6 +236,7 @@ export default function TokenizeAsset() {
     try {
       await navigator.clipboard.writeText(text)
       enqueueSnackbar('Asset ID copied to clipboard', { variant: 'success' })
+      setTransferMode('manual')
       setTransferAssetId(text)
     } catch {
       enqueueSnackbar('Copy failed. Please copy manually.', { variant: 'warning' })
@@ -282,16 +337,11 @@ export default function TokenizeAsset() {
   }
 
   /**
-   * Transfer ASA (works for NFTs too, since NFTs are ASAs)
+   * Transfer (Manual ASA / USDC ASA / ALGO payment)
    */
   const handleTransferAsset = async () => {
     if (!transactionSigner || !activeAddress) {
       enqueueSnackbar('Please connect your wallet first.', { variant: 'warning' })
-      return
-    }
-
-    if (!transferAssetId || !isWholeNumber(transferAssetId)) {
-      enqueueSnackbar('Please enter a valid Asset ID (number).', { variant: 'warning' })
       return
     }
 
@@ -300,45 +350,130 @@ export default function TokenizeAsset() {
       return
     }
 
-    if (!transferAmount || !isWholeNumber(transferAmount)) {
-      enqueueSnackbar('Amount must be a whole number.', { variant: 'warning' })
+    if (!transferAmount || Number(transferAmount) <= 0) {
+      enqueueSnackbar('Please enter an amount greater than 0.', { variant: 'warning' })
       return
+    }
+
+    // Manual ASA validates Asset ID + whole-number amount
+    if (transferMode === 'manual') {
+      if (!transferAssetId || !isWholeNumber(transferAssetId)) {
+        enqueueSnackbar('Please enter a valid Asset ID (number).', { variant: 'warning' })
+        return
+      }
+      if (!isWholeNumber(transferAmount)) {
+        enqueueSnackbar('Amount must be a whole number for manual ASA transfers.', { variant: 'warning' })
+        return
+      }
+    }
+
+    // USDC + ALGO allow decimals up to 6
+    if (transferMode === 'algo' || transferMode === 'usdc') {
+      if (!/^\d+(\.\d+)?$/.test(transferAmount.trim())) {
+        enqueueSnackbar('Amount must be a valid number (decimals allowed).', { variant: 'warning' })
+        return
+      }
     }
 
     try {
       setTransferLoading(true)
-      enqueueSnackbar('Transferring asset...', { variant: 'info' })
 
-      const result = await algorand.send.assetTransfer({
-        sender: activeAddress,
-        signer: transactionSigner,
-        assetId: Number(transferAssetId),
-        receiver: receiverAddress,
-        amount: BigInt(transferAmount),
-      })
+      if (transferMode === 'algo') {
+        enqueueSnackbar('Sending ALGO...', { variant: 'info' })
 
-      const txId = (result as { txId?: string }).txId
+        const microAlgos = decimalToBaseUnits(transferAmount, ALGO_DECIMALS)
 
-      enqueueSnackbar('✅ Transfer complete!', {
-        variant: 'success',
-        action: () =>
-          txId ? (
-            <a
-              href={`${LORA_BASE}/transaction/${txId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ textDecoration: 'underline', marginLeft: 8 }}
-            >
-              View Tx on Lora ↗
-            </a>
-          ) : null,
-      })
+        const result = await algorand.send.payment({
+          sender: activeAddress,
+          signer: transactionSigner,
+          receiver: receiverAddress,
+          amount: { microAlgo: Number(microAlgos) },
+        })
+
+        const txId = (result as { txId?: string }).txId
+
+        enqueueSnackbar('✅ ALGO sent!', {
+          variant: 'success',
+          action: () =>
+            txId ? (
+              <a
+                href={`${LORA_BASE}/transaction/${txId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'underline', marginLeft: 8 }}
+              >
+                View Tx on Lora ↗
+              </a>
+            ) : null,
+        })
+      } else if (transferMode === 'usdc') {
+        enqueueSnackbar('Sending USDC...', { variant: 'info' })
+
+        const usdcAmount = decimalToBaseUnits(transferAmount, USDC_DECIMALS)
+
+        const result = await algorand.send.assetTransfer({
+          sender: activeAddress,
+          signer: transactionSigner,
+          assetId: TESTNET_USDC_ASSET_ID,
+          receiver: receiverAddress,
+          amount: usdcAmount,
+        })
+
+        const txId = (result as { txId?: string }).txId
+
+        enqueueSnackbar('✅ USDC transfer complete!', {
+          variant: 'success',
+          action: () =>
+            txId ? (
+              <a
+                href={`${LORA_BASE}/transaction/${txId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'underline', marginLeft: 8 }}
+              >
+                View Tx on Lora ↗
+              </a>
+            ) : null,
+        })
+      } else {
+        // manual ASA
+        enqueueSnackbar('Transferring asset...', { variant: 'info' })
+
+        const result = await algorand.send.assetTransfer({
+          sender: activeAddress,
+          signer: transactionSigner,
+          assetId: Number(transferAssetId),
+          receiver: receiverAddress,
+          amount: BigInt(transferAmount),
+        })
+
+        const txId = (result as { txId?: string }).txId
+
+        enqueueSnackbar('✅ Transfer complete!', {
+          variant: 'success',
+          action: () =>
+            txId ? (
+              <a
+                href={`${LORA_BASE}/transaction/${txId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'underline', marginLeft: 8 }}
+              >
+                View Tx on Lora ↗
+              </a>
+            ) : null,
+        })
+      }
 
       setReceiverAddress('')
       setTransferAmount('1')
     } catch (error) {
       console.error(error)
-      enqueueSnackbar('Transfer failed. Make sure the recipient has opted in.', { variant: 'error' })
+      if (transferMode === 'algo') {
+        enqueueSnackbar('ALGO send failed.', { variant: 'error' })
+      } else {
+        enqueueSnackbar('Transfer failed. If sending an ASA (incl. USDC), make sure the recipient has opted in.', { variant: 'error' })
+      }
     } finally {
       setTransferLoading(false)
     }
@@ -462,7 +597,8 @@ export default function TokenizeAsset() {
       const next = persistAsset(nftEntry)
       setCreatedAssets(next)
 
-      // QoL: prefill transfer section with minted asset id
+      // QoL: switch to manual mode + prefill transfer section with minted asset id
+      setTransferMode('manual')
       setTransferAssetId(String(assetId))
 
       enqueueSnackbar(`✅ Success! NFT Asset ID: ${assetId}`, {
@@ -502,6 +638,12 @@ export default function TokenizeAsset() {
     !!selectedFile &&
     !!activeAddress &&
     !nftLoading
+
+  const transferAmountLabel =
+    transferMode === 'algo' ? 'Amount (ALGO)' : transferMode === 'usdc' ? 'Amount (USDC)' : 'Amount'
+
+  const transferAssetIdLabel =
+    transferMode === 'algo' ? 'Asset (ALGO)' : transferMode === 'usdc' ? 'Asset (USDC)' : 'Asset ID'
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg p-6 sm:p-8">
@@ -543,165 +685,165 @@ export default function TokenizeAsset() {
             </div>
 
             <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm p-5 sm:p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Asset Name</label>
-                <input
-                  type="text"
-                  className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
-                  value={assetName}
-                  onChange={(e) => setAssetName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Symbol</label>
-                <input
-                  type="text"
-                  className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
-                  value={unitName}
-                  onChange={(e) => setUnitName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Total Supply</label>
-                <input
-                  type="number"
-                  min={1}
-                  className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
-                  value={total}
-                  onChange={(e) => setTotal(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                  <span>Decimals</span>
-                  <div className="group relative">
-                    <AiOutlineInfoCircle className="text-slate-400 cursor-help hover:text-slate-600 dark:hover:text-slate-300" />
-                    <div className="invisible group-hover:visible bg-slate-900 dark:bg-slate-800 text-white dark:text-slate-200 text-xs rounded px-2 py-1 whitespace-nowrap absolute bottom-full left-0 mb-1 z-10">
-                      Decimals controls fractional units. 0 = whole units only.
-                    </div>
-                  </div>
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={19}
-                  className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
-                  value={decimals}
-                  onChange={(e) => setDecimals(e.target.value)}
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                  <span>Metadata URL (optional)</span>
-                  <div className="group relative">
-                    <AiOutlineInfoCircle className="text-slate-400 cursor-help hover:text-slate-600 dark:hover:text-slate-300" />
-                    <div className="invisible group-hover:visible bg-slate-900 dark:bg-slate-800 text-white dark:text-slate-200 text-xs rounded px-2 py-1 whitespace-nowrap absolute bottom-full left-0 mb-1 z-10">
-                      A public link describing the asset (JSON, webpage, or doc).
-                    </div>
-                  </div>
-                </label>
-                <input
-                  type="url"
-                  className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
-                  placeholder="https://example.com/metadata.json"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced((s) => !s)}
-                className="flex items-center gap-2 text-sm font-medium text-primary hover:underline transition"
-              >
-                <span>{showAdvanced ? 'Hide advanced options' : 'Show advanced options'}</span>
-                <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
-              </button>
-
-              {showAdvanced && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {[
-                    {
-                      label: 'Manager',
-                      tip: 'The manager can update or reconfigure asset settings. Often set to the issuer wallet.',
-                      value: manager,
-                      setValue: setManager,
-                      placeholder: 'Defaults to your wallet address',
-                    },
-                    {
-                      label: 'Reserve',
-                      tip: 'Reserve may hold non-circulating supply depending on your design. Leave blank to disable.',
-                      value: reserve,
-                      setValue: setReserve,
-                      placeholder: 'Optional address',
-                    },
-                    {
-                      label: 'Freeze',
-                      tip: 'Freeze can freeze/unfreeze holdings (useful for compliance). Leave blank to disable.',
-                      value: freeze,
-                      setValue: setFreeze,
-                      placeholder: 'Optional address',
-                    },
-                    {
-                      label: 'Clawback',
-                      tip: 'Clawback can revoke tokens from accounts (recovery/compliance). Leave blank to disable.',
-                      value: clawback,
-                      setValue: setClawback,
-                      placeholder: 'Optional address',
-                    },
-                  ].map((f) => (
-                    <div key={f.label}>
-                      <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                        <span>{f.label}</span>
-                        <div className="group relative">
-                          <AiOutlineInfoCircle className="text-slate-400 cursor-help hover:text-slate-600 dark:hover:text-slate-300" />
-                          <div className="invisible group-hover:visible bg-slate-900 dark:bg-slate-800 text-white dark:text-slate-200 text-xs rounded px-2 py-1 whitespace-nowrap absolute bottom-full left-0 mb-1 z-10">
-                            {f.tip}
-                          </div>
-                        </div>
-                      </label>
-                      <input
-                        type="text"
-                        className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
-                        placeholder={f.placeholder}
-                        value={f.value}
-                        onChange={(e) => f.setValue(e.target.value)}
-                      />
-                    </div>
-                  ))}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Asset Name</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                    value={assetName}
+                    onChange={(e) => setAssetName(e.target.value)}
+                  />
                 </div>
-              )}
-            </div>
 
-            <div className="mt-8 flex flex-col sm:flex-row gap-3 sm:justify-end">
-              <button
-                type="button"
-                className={`px-6 py-3 rounded-lg font-semibold transition ${
-                  canSubmit
-                    ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
-                    : 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'
-                }`}
-                onClick={handleTokenize}
-                disabled={!canSubmit}
-              >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <AiOutlineLoading3Quarters className="animate-spin" />
-                    Creating…
-                  </span>
-                ) : (
-                  'Tokenize Asset'
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Symbol</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                    value={unitName}
+                    onChange={(e) => setUnitName(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Total Supply</label>
+                  <input
+                    type="number"
+                    min={1}
+                    className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                    value={total}
+                    onChange={(e) => setTotal(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <span>Decimals</span>
+                    <div className="group relative">
+                      <AiOutlineInfoCircle className="text-slate-400 cursor-help hover:text-slate-600 dark:hover:text-slate-300" />
+                      <div className="invisible group-hover:visible bg-slate-900 dark:bg-slate-800 text-white dark:text-slate-200 text-xs rounded px-2 py-1 whitespace-nowrap absolute bottom-full left-0 mb-1 z-10">
+                        Decimals controls fractional units. 0 = whole units only.
+                      </div>
+                    </div>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={19}
+                    className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                    value={decimals}
+                    onChange={(e) => setDecimals(e.target.value)}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                    <span>Metadata URL (optional)</span>
+                    <div className="group relative">
+                      <AiOutlineInfoCircle className="text-slate-400 cursor-help hover:text-slate-600 dark:hover:text-slate-300" />
+                      <div className="invisible group-hover:visible bg-slate-900 dark:bg-slate-800 text-white dark:text-slate-200 text-xs rounded px-2 py-1 whitespace-nowrap absolute bottom-full left-0 mb-1 z-10">
+                        A public link describing the asset (JSON, webpage, or doc).
+                      </div>
+                    </div>
+                  </label>
+                  <input
+                    type="url"
+                    className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                    placeholder="https://example.com/metadata.json"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced((s) => !s)}
+                  className="flex items-center gap-2 text-sm font-medium text-primary hover:underline transition"
+                >
+                  <span>{showAdvanced ? 'Hide advanced options' : 'Show advanced options'}</span>
+                  <span className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}>▾</span>
+                </button>
+
+                {showAdvanced && (
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {[
+                      {
+                        label: 'Manager',
+                        tip: 'The manager can update or reconfigure asset settings. Often set to the issuer wallet.',
+                        value: manager,
+                        setValue: setManager,
+                        placeholder: 'Defaults to your wallet address',
+                      },
+                      {
+                        label: 'Reserve',
+                        tip: 'Reserve may hold non-circulating supply depending on your design. Leave blank to disable.',
+                        value: reserve,
+                        setValue: setReserve,
+                        placeholder: 'Optional address',
+                      },
+                      {
+                        label: 'Freeze',
+                        tip: 'Freeze can freeze/unfreeze holdings (useful for compliance). Leave blank to disable.',
+                        value: freeze,
+                        setValue: setFreeze,
+                        placeholder: 'Optional address',
+                      },
+                      {
+                        label: 'Clawback',
+                        tip: 'Clawback can revoke tokens from accounts (recovery/compliance). Leave blank to disable.',
+                        value: clawback,
+                        setValue: setClawback,
+                        placeholder: 'Optional address',
+                      },
+                    ].map((f) => (
+                      <div key={f.label}>
+                        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                          <span>{f.label}</span>
+                          <div className="group relative">
+                            <AiOutlineInfoCircle className="text-slate-400 cursor-help hover:text-slate-600 dark:hover:text-slate-300" />
+                            <div className="invisible group-hover:visible bg-slate-900 dark:bg-slate-800 text-white dark:text-slate-200 text-xs rounded px-2 py-1 whitespace-nowrap absolute bottom-full left-0 mb-1 z-10">
+                              {f.tip}
+                            </div>
+                          </div>
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
+                          placeholder={f.placeholder}
+                          value={f.value}
+                          onChange={(e) => f.setValue(e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </button>
+              </div>
+
+              <div className="mt-8 flex flex-col sm:flex-row gap-3 sm:justify-end">
+                <button
+                  type="button"
+                  className={`px-6 py-3 rounded-lg font-semibold transition ${
+                    canSubmit
+                      ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
+                      : 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'
+                  }`}
+                  onClick={handleTokenize}
+                  disabled={!canSubmit}
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <AiOutlineLoading3Quarters className="animate-spin" />
+                      Creating…
+                    </span>
+                  ) : (
+                    'Tokenize Asset'
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
           </div>
 
           {/* ===== RIGHT: NFT MINT PANEL ===== */}
@@ -709,11 +851,15 @@ export default function TokenizeAsset() {
             <div className="mb-4">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">Tokenize an NFT (Mint ASA)</h3>
               <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                Upload an image → backend pins to IPFS → mint an ASA with metadata on Algorand TestNet.
+                Upload an image → backend pins to IPFS → mint an ASA with metadata.
               </p>
             </div>
 
-            <div className={`rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm p-5 sm:p-6 ${nftLoading ? 'pointer-events-none opacity-70' : ''}`}>
+            <div
+              className={`rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm p-5 sm:p-6 ${
+                nftLoading ? 'pointer-events-none opacity-70' : ''
+              }`}
+            >
               {/* NFT fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
@@ -897,7 +1043,9 @@ export default function TokenizeAsset() {
                   onClick={handleMintNFT}
                   disabled={!canMintNft}
                   className={`px-6 py-3 rounded-lg font-semibold transition ${
-                    canMintNft ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-md' : 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'
+                    canMintNft
+                      ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
+                      : 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-400'
                   }`}
                 >
                   {nftLoading ? (
@@ -994,21 +1142,66 @@ export default function TokenizeAsset() {
           </p>
         </div>
 
-        {/* ===== TRANSFER ASSET ===== */}
+        {/* ===== TRANSFER ===== */}
         <div className="mt-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg p-6 sm:p-8">
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Transfer Asset</h3>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Send units of an Algorand Standard Asset (ASA) to another wallet.</p>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Transfer</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Send ALGO, USDC, or any ASA (including NFTs) to another wallet.</p>
+
+          {/* Mode selector */}
+          <div className="mb-5">
+            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Transfer type</label>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                <input
+                  type="radio"
+                  name="transferMode"
+                  checked={transferMode === 'manual'}
+                  onChange={() => setTransferMode('manual')}
+                  className="h-4 w-4"
+                />
+                Manual (custom ASA)
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                <input
+                  type="radio"
+                  name="transferMode"
+                  checked={transferMode === 'algo'}
+                  onChange={() => setTransferMode('algo')}
+                  className="h-4 w-4"
+                />
+                ALGO
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                <input
+                  type="radio"
+                  name="transferMode"
+                  checked={transferMode === 'usdc'}
+                  onChange={() => setTransferMode('usdc')}
+                  className="h-4 w-4"
+                />
+                USDC (TestNet)
+              </label>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Asset ID</label>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">{transferAssetIdLabel}</label>
               <input
                 type="text"
                 className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
                 placeholder="e.g. 123456789"
                 value={transferAssetId}
                 onChange={(e) => setTransferAssetId(e.target.value)}
+                disabled={transferMode === 'algo' || transferMode === 'usdc'}
               />
+              {transferMode === 'usdc' && (
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  USDC TestNet Asset ID: <span className="font-mono">{TESTNET_USDC_ASSET_ID}</span>
+                </p>
+              )}
             </div>
 
             <div>
@@ -1023,14 +1216,21 @@ export default function TokenizeAsset() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Amount</label>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">{transferAmountLabel}</label>
               <input
-                type="number"
-                min={1}
+                type="text"
+                inputMode="decimal"
                 className="w-full rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-600 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-900/30 px-4 py-2 transition"
                 value={transferAmount}
                 onChange={(e) => setTransferAmount(e.target.value)}
+                placeholder={transferMode === 'manual' ? 'e.g. 1' : 'e.g. 1.5'}
               />
+              {transferMode === 'manual' && (
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Manual ASA transfers use whole-number amounts.</p>
+              )}
+              {(transferMode === 'algo' || transferMode === 'usdc') && (
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Decimals allowed (up to 6 places).</p>
+              )}
             </div>
           </div>
 
@@ -1045,13 +1245,15 @@ export default function TokenizeAsset() {
                   : 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
               }`}
             >
-              {transferLoading ? 'Transferring…' : 'Transfer Asset'}
+              {transferLoading ? 'Transferring…' : transferMode === 'algo' ? 'Send ALGO' : transferMode === 'usdc' ? 'Send USDC' : 'Transfer Asset'}
             </button>
           </div>
 
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
             <AiOutlineInfoCircle />
-            The recipient must opt-in to the asset before receiving it.
+            {transferMode === 'algo'
+              ? 'ALGO payments do not require opt-in.'
+              : 'For ASAs (including USDC and NFTs), the recipient must opt-in to the asset before receiving it.'}
           </p>
         </div>
       </div>
