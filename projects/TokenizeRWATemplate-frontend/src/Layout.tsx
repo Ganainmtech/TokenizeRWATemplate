@@ -1,18 +1,24 @@
-import { useWallet } from '@txnlab/use-wallet-react'
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import ConnectWallet from './components/ConnectWallet'
 import ThemeToggle from './components/ThemeToggle'
+import Web3AuthButton from './components/Web3AuthButton'
+import { useUnifiedWallet } from './hooks/useUnifiedWallet'
 
 /**
  * Main Layout Component
  * Wraps the entire app with navigation, footer, and wallet connection modal
+ * Now with unified wallet support - shows mutual exclusion between Web3Auth and traditional wallets
  */
 export default function Layout() {
   const [openWalletModal, setOpenWalletModal] = useState(false)
-  const { activeAddress } = useWallet()
+  const { walletType } = useUnifiedWallet()
 
   const toggleWalletModal = () => setOpenWalletModal(!openWalletModal)
+
+  // Determine button states based on which wallet is active
+  const isWeb3AuthActive = walletType === 'web3auth'
+  const isTraditionalActive = walletType === 'traditional'
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -47,11 +53,30 @@ export default function Layout() {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
+
+            {/* Web3Auth Button - disabled if traditional wallet is active */}
+            <div className={isTraditionalActive ? 'opacity-50 pointer-events-none' : ''}>
+              <Web3AuthButton />
+            </div>
+
+            {/* Traditional Wallet Button - disabled if Web3Auth is active */}
             <button
               onClick={toggleWalletModal}
-              className="px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition text-sm shadow-sm"
+              disabled={isWeb3AuthActive}
+              className={`px-4 py-2 rounded-lg font-medium transition text-sm shadow-sm ${
+                isWeb3AuthActive
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:text-slate-500'
+                  : isTraditionalActive
+                    ? 'bg-teal-600 text-white hover:bg-teal-700'
+                    : 'bg-teal-600 text-white hover:bg-teal-700'
+              }`}
+              title={isWeb3AuthActive ? 'Using Web3Auth - disconnect to use traditional wallet' : undefined}
             >
-              {activeAddress ? 'Wallet Connected' : 'Connect Wallet'}
+              {isWeb3AuthActive
+                ? 'Using Web3Auth'
+                : isTraditionalActive
+                  ? 'Wallet Connected'
+                  : 'Connect Wallet'}
             </button>
           </div>
         </div>

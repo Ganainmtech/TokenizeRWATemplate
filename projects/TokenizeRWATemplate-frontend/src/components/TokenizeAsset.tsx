@@ -1,10 +1,10 @@
 import { AlgorandClient } from '@algorandfoundation/algokit-utils'
-import { useWallet } from '@txnlab/use-wallet-react'
 import { sha512_256 } from 'js-sha512'
 import { useSnackbar } from 'notistack'
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { AiOutlineCloudUpload, AiOutlineInfoCircle, AiOutlineLoading3Quarters } from 'react-icons/ai'
 import { BsCoin } from 'react-icons/bs'
+import { useUnifiedWallet } from '../hooks/useUnifiedWallet'
 import { getAlgodConfigFromViteEnvironment } from '../utils/network/getAlgoClientConfigs'
 
 /**
@@ -151,8 +151,10 @@ export default function TokenizeAsset() {
   const [nftFreeze, setNftFreeze] = useState<string>('')
   const [nftClawback, setNftClawback] = useState<string>('')
 
-  // ===== Wallet + notifications =====
-  const { transactionSigner, activeAddress } = useWallet()
+  // ===== Unified wallet (Web3Auth OR WalletConnect) =====
+  const { signer, activeAddress } = useUnifiedWallet()
+
+  // ===== Notifications =====
   const { enqueueSnackbar } = useSnackbar()
 
   // ===== Algorand client =====
@@ -248,8 +250,8 @@ export default function TokenizeAsset() {
    * Adjusts total supply by decimals and saves asset to localStorage
    */
   const handleTokenize = async () => {
-    if (!transactionSigner || !activeAddress) {
-      enqueueSnackbar('Please connect your wallet first.', { variant: 'warning' })
+    if (!signer || !activeAddress) {
+      enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
 
@@ -280,7 +282,7 @@ export default function TokenizeAsset() {
 
       const createResult = await algorand.send.assetCreate({
         sender: activeAddress,
-        signer: transactionSigner,
+        signer,
         total: onChainTotal,
         decimals: d,
         assetName,
@@ -340,8 +342,8 @@ export default function TokenizeAsset() {
    * Transfer (Manual ASA / USDC ASA / ALGO payment)
    */
   const handleTransferAsset = async () => {
-    if (!transactionSigner || !activeAddress) {
-      enqueueSnackbar('Please connect your wallet first.', { variant: 'warning' })
+    if (!signer || !activeAddress) {
+      enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
 
@@ -385,7 +387,7 @@ export default function TokenizeAsset() {
 
         const result = await algorand.send.payment({
           sender: activeAddress,
-          signer: transactionSigner,
+          signer,
           receiver: receiverAddress,
           amount: { microAlgo: Number(microAlgos) },
         })
@@ -413,7 +415,7 @@ export default function TokenizeAsset() {
 
         const result = await algorand.send.assetTransfer({
           sender: activeAddress,
-          signer: transactionSigner,
+          signer,
           assetId: TESTNET_USDC_ASSET_ID,
           receiver: receiverAddress,
           amount: usdcAmount,
@@ -441,7 +443,7 @@ export default function TokenizeAsset() {
 
         const result = await algorand.send.assetTransfer({
           sender: activeAddress,
-          signer: transactionSigner,
+          signer,
           assetId: Number(transferAssetId),
           receiver: receiverAddress,
           amount: BigInt(transferAmount),
@@ -491,8 +493,8 @@ export default function TokenizeAsset() {
   const handleDivClick = () => fileInputRef.current?.click()
 
   const handleMintNFT = async () => {
-    if (!transactionSigner || !activeAddress) {
-      enqueueSnackbar('Please connect wallet first', { variant: 'warning' })
+    if (!signer || !activeAddress) {
+      enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
 
@@ -563,7 +565,7 @@ export default function TokenizeAsset() {
 
       const createNFTResult = await algorand.send.assetCreate({
         sender: activeAddress,
-        signer: transactionSigner,
+        signer,
         total: onChainTotal,
         decimals: d,
         assetName: nftName,
@@ -630,20 +632,11 @@ export default function TokenizeAsset() {
 
   const canSubmit = !!assetName && !!unitName && !!total && !loading && !!activeAddress
 
-  const canMintNft =
-    !!nftName &&
-    !!nftUnit &&
-    !!nftSupply &&
-    !!nftDecimals &&
-    !!selectedFile &&
-    !!activeAddress &&
-    !nftLoading
+  const canMintNft = !!nftName && !!nftUnit && !!nftSupply && !!nftDecimals && !!selectedFile && !!activeAddress && !nftLoading
 
-  const transferAmountLabel =
-    transferMode === 'algo' ? 'Amount (ALGO)' : transferMode === 'usdc' ? 'Amount (USDC)' : 'Amount'
+  const transferAmountLabel = transferMode === 'algo' ? 'Amount (ALGO)' : transferMode === 'usdc' ? 'Amount (USDC)' : 'Amount'
 
-  const transferAssetIdLabel =
-    transferMode === 'algo' ? 'Asset (ALGO)' : transferMode === 'usdc' ? 'Asset (USDC)' : 'Asset ID'
+  const transferAssetIdLabel = transferMode === 'algo' ? 'Asset (ALGO)' : transferMode === 'usdc' ? 'Asset (USDC)' : 'Asset ID'
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg p-6 sm:p-8">
@@ -1008,7 +1001,11 @@ export default function TokenizeAsset() {
                   onClick={handleDivClick}
                 >
                   {previewUrl ? (
-                    <img src={previewUrl} alt="NFT preview" className="rounded-lg max-h-48 object-contain shadow-sm bg-white dark:bg-slate-900" />
+                    <img
+                      src={previewUrl}
+                      alt="NFT preview"
+                      className="rounded-lg max-h-48 object-contain shadow-sm bg-white dark:bg-slate-900"
+                    />
                   ) : (
                     <div className="text-center">
                       <AiOutlineCloudUpload className="mx-auto h-12 w-12 text-slate-400" />
@@ -1245,7 +1242,13 @@ export default function TokenizeAsset() {
                   : 'bg-teal-600 hover:bg-teal-700 text-white shadow-md'
               }`}
             >
-              {transferLoading ? 'Transferring…' : transferMode === 'algo' ? 'Send ALGO' : transferMode === 'usdc' ? 'Send USDC' : 'Transfer Asset'}
+              {transferLoading
+                ? 'Transferring…'
+                : transferMode === 'algo'
+                  ? 'Send ALGO'
+                  : transferMode === 'usdc'
+                    ? 'Send USDC'
+                    : 'Transfer Asset'}
             </button>
           </div>
 

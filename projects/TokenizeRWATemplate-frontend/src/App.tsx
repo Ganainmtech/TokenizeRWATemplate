@@ -1,6 +1,7 @@
 import { SupportedWallet, WalletId, WalletManager, WalletProvider } from '@txnlab/use-wallet-react'
 import { SnackbarProvider } from 'notistack'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { Web3AuthProvider } from './components/Web3AuthProvider'
 import Home from './Home'
 import Layout from './Layout'
 import TokenizePage from './TokenizePage'
@@ -53,16 +54,18 @@ export default function App() {
 
   return (
     <SnackbarProvider maxSnack={3}>
-      <WalletProvider manager={walletManager}>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Home />} />
-              <Route path="/tokenize" element={<TokenizePage />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </WalletProvider>
+      <Web3AuthProvider>
+        <WalletProvider manager={walletManager}>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Home />} />
+                <Route path="/tokenize" element={<TokenizePage />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </WalletProvider>
+      </Web3AuthProvider>
     </SnackbarProvider>
   )
 }
