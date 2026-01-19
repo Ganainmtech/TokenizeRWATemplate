@@ -40,12 +40,7 @@ function buildSupportedWallets(): SupportedWallet[] {
       id: WalletId.WEB3AUTH,
       options: {
         clientId: web3AuthClientId,
-        // Web3Auth network: 'sapphire_devnet' for development, 'sapphire_mainnet' for production
-        web3AuthNetwork: 'sapphire_devnet',
-        // Optional: Set default login provider (e.g., 'google' for direct Google login)
-        // If not set, shows full provider selection modal
-        // loginProvider: 'google',
-        // Optional: UI customization
+        web3AuthNetwork: 'sapphire_devnet', // Use 'sapphire_mainnet' for production
         uiConfig: {
           appName: 'Tokenize RWA Template',
           mode: 'auto', // 'auto' | 'light' | 'dark'
@@ -62,7 +57,7 @@ export default function App() {
 
   const supportedWallets = useMemo(() => buildSupportedWallets(), [])
   const walletManager = useMemo(() => {
-    const mgr = new WalletManager({
+    return new WalletManager({
       wallets: supportedWallets,
       defaultNetwork: algodConfig.network,
       networks: {
@@ -78,8 +73,6 @@ export default function App() {
         resetNetwork: true,
       },
     })
-
-    return mgr
   }, [algodConfig.network, algodConfig.server, algodConfig.port, algodConfig.token, supportedWallets])
 
   return (

@@ -9,159 +9,82 @@ interface ConnectWalletProps {
 }
 
 const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
-  const { wallets, activeWallet, activeAddress, isReady, isActive, disconnect } = useWallet()
+  const { wallets, activeWallet, activeAddress } = useWallet()
 
-  const [connectingId, setConnectingId] = useState<string | null>(null)
+  const [connectingKey, setConnectingKey] = useState<string | null>(null)
   const [lastError, setLastError] = useState<string>('')
   const [copied, setCopied] = useState(false)
 
   // Get network config for Lora link
   const algoConfig = getAlgodConfigFromViteEnvironment()
-  const networkName = useMemo(() => {
-    return algoConfig.network === '' ? 'localnet' : algoConfig.network.toLowerCase()
-  }, [algoConfig.network])
+  const networkName = useMemo(() => (algoConfig.network === '' ? 'localnet' : algoConfig.network.toLowerCase()), [algoConfig.network])
 
-  // Get all registered wallets
-  const visibleWallets = useMemo(() => {
-    return (wallets ?? []).filter(Boolean)
-  }, [wallets])
+  const visibleWallets = useMemo(() => (wallets ?? []).filter(Boolean), [wallets])
 
-  // Handle wallet connection
-  const handleConnect = async (wallet: BaseWallet) => {
+  // Connected if we have an address
+  const connected = Boolean(activeAddress)
+
+  // Separate Web3Auth from traditional wallets
+  const web3AuthWallet = visibleWallets.find((w) => w.id === WalletId.WEB3AUTH)
+  const traditionalWallets = visibleWallets.filter((w) => w.id !== WalletId.WEB3AUTH)
+
+  // Capture wallet ID for logout (before disconnect clears it)
+  const activeWalletId = activeWallet?.id
+
+  const connectWallet = async (wallet: BaseWallet) => {
     setLastError('')
-    setConnectingId(wallet.id)
+    setConnectingKey(wallet.id)
 
     try {
       if (typeof wallet.connect !== 'function') {
         throw new Error(`Wallet "${wallet.id}" is missing connect().`)
       }
 
-      // For Web3Auth, try to access and manually initialize if needed
-      if (wallet.id === WalletId.WEB3AUTH) {
-        const walletAny = wallet as any
-
-        // Check if we can access the internal Web3Auth instance
-        const web3AuthInstance = walletAny.web3Auth || walletAny._web3Auth || walletAny.instance
-
-        if (web3AuthInstance) {
-          // If not initialized, try to initialize
-          if (web3AuthInstance.status !== 'ready' && typeof web3AuthInstance.init === 'function') {
-            try {
-              await web3AuthInstance.init()
-            } catch (initError) {
-              setLastError(`Web3Auth initialization failed: ${initError}`)
-              return
-            }
-          }
-
-          // If initialized but not connected, try direct connect
-          if (web3AuthInstance.status === 'ready' && !web3AuthInstance.connected) {
-            try {
-              await web3AuthInstance.connect()
-              // Don't call wallet.connect() if we already connected directly
-              closeModal()
-              return
-            } catch (directConnectError) {
-              // Fall through to try wallet.connect()
-            }
-          }
-        }
-      }
-
-      // Call connect - this should open the Web3Auth modal
-      const connectPromise = wallet.connect()
-
-      // Add timeout for Web3Auth to detect if it hangs
-      if (wallet.id === WalletId.WEB3AUTH) {
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => {
-            reject(
-              new Error(
-                'Web3Auth connection timed out after 30 seconds. The modal may not have opened. Check browser console for Web3Auth initialization errors.',
-              ),
-            )
-          }, 30000)
-        })
-
-        await Promise.race([connectPromise, timeoutPromise])
-      } else {
-        await connectPromise
-      }
-
-      // For Web3Auth, verify the address was set
-      if (wallet.id === WalletId.WEB3AUTH) {
-        // Wait a bit to see if state updates
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-
-        // Check if address was set
-        const hasAddress = activeAddress && activeAddress.length > 0
-
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-
-        if (!hasAddress) {
-          return
-        }
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 500))
-      }
-
+      await wallet.connect()
       closeModal()
-    } catch (e: any) {
-      const msg = e?.message ? String(e.message) : String(e)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[ConnectWallet] Failed to connect "${wallet.id}"`, e)
 
-      // Provide more helpful error messages for Web3Auth
       if (wallet.id === WalletId.WEB3AUTH) {
-        if (msg.includes('clientId') || msg.includes('Client ID')) {
-          setLastError('Web3Auth Client ID is missing or invalid. Check your .env file.')
-        } else if (msg.includes('network') || msg.includes('Network')) {
-          setLastError('Web3Auth network configuration error. Check your network settings.')
-        } else if (msg.includes('timeout')) {
-          setLastError('Web3Auth connection timed out. The login modal may not have opened. Check browser console for Web3Auth errors.')
-        } else {
-          setLastError(`Web3Auth connection failed: ${msg}`)
-        }
+        setLastError(`Web3Auth sign-in failed: ${msg}`)
       } else {
         setLastError(`Failed to connect ${wallet.id}: ${msg}`)
       }
     } finally {
-      setConnectingId(null)
+      setConnectingKey(null)
     }
   }
 
-  // Handle disconnect
-  const handleDisconnect = async () => {
+  const handleLogout = async () => {
     setLastError('')
+    const wasWeb3Auth = activeWalletId === WalletId.WEB3AUTH
+
     try {
-      // For Web3Auth, we might need to use the wallet's disconnect method directly
-      if (activeWallet) {
-        // Try the wallet's disconnect method first
-        if (typeof (activeWallet as any).disconnect === 'function') {
-          await (activeWallet as any).disconnect()
-        }
-        // Fall back to hook's disconnect if available
-        else if (typeof disconnect === 'function') {
-          await disconnect()
-        }
-      } else if (typeof disconnect === 'function') {
-        await disconnect()
+      // In use-wallet v4.x, disconnect is on the activeWallet object
+      if (activeWallet && typeof activeWallet.disconnect === 'function') {
+        await activeWallet.disconnect()
       }
+
+      // Web3Auth needs a hard refresh to fully clear cached auth state
+      if (wasWeb3Auth) {
+        window.location.reload()
+        return
+      }
+
       closeModal()
-    } catch (e: any) {
-      // Silently handle disconnect errors
+    } catch (e: unknown) {
+      console.error('[ConnectWallet] Logout failed', e)
+      // Still close modal on error - user wanted to disconnect
       closeModal()
+    } finally {
+      setConnectingKey(null)
     }
   }
 
-  // Don't render if modal is closed
   if (!openModal) return null
 
-  // Check if wallet is connected - activeAddress is the primary indicator
-  // isActive might be undefined for Web3Auth, so we check activeAddress
-  const connected = Boolean(activeAddress)
-
-  // Separate Web3Auth from traditional wallets for better UX
-  const web3AuthWallet = visibleWallets.find((w) => w.id === WalletId.WEB3AUTH)
-  const traditionalWallets = visibleWallets.filter((w) => w.id !== WalletId.WEB3AUTH)
+  const isConnectingAny = Boolean(connectingKey)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeModal}>
@@ -172,7 +95,11 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xl font-bold text-slate-900 dark:text-white">{connected ? 'Account' : 'Sign in'}</h3>
-          <button onClick={closeModal} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition">
+          <button
+            onClick={closeModal}
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition"
+            aria-label="Close"
+          >
             <span className="text-xl text-slate-500">✕</span>
           </button>
         </div>
@@ -196,21 +123,21 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
                 </div>
               </div>
 
-              {/* Address with copy button */}
+              {/* Address with copy */}
               <div className="flex items-center gap-2 mb-3">
                 <div className="font-mono text-sm break-all text-slate-900 dark:text-white flex-1">
                   {ellipseAddress(activeAddress || '', 8)}
                 </div>
+
                 <button
                   onClick={async () => {
-                    if (activeAddress) {
-                      try {
-                        await navigator.clipboard.writeText(activeAddress)
-                        setCopied(true)
-                        setTimeout(() => setCopied(false), 2000)
-                      } catch (e) {
-                        // Silently handle copy errors
-                      }
+                    if (!activeAddress) return
+                    try {
+                      await navigator.clipboard.writeText(activeAddress)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 1800)
+                    } catch {
+                      // ignore
                     }
                   }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-600 transition"
@@ -220,7 +147,7 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
                 </button>
               </div>
 
-              {/* Full address (collapsible) */}
+              {/* Full address */}
               <details className="mb-3">
                 <summary className="text-xs text-slate-500 dark:text-slate-400 cursor-pointer hover:text-slate-700 dark:hover:text-slate-300">
                   Show full address
@@ -230,51 +157,57 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
                 </div>
               </details>
 
-              {/* Wallet type and Lora link */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-700">
-                <div className="text-sm text-slate-700 dark:text-slate-200">
-                  Wallet: <span className="font-semibold">{activeWallet?.metadata?.name ?? activeWallet?.id}</span>
+              {/* Wallet + Network + Lora */}
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-slate-700 dark:text-slate-200">
+                    Wallet: <span className="font-semibold">{activeWallet?.metadata?.name ?? activeWallet?.id}</span>
+                  </div>
+
+                  {activeAddress && (
+                    <a
+                      href={`https://lora.algokit.io/${networkName}/account/${activeAddress}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 transition flex items-center gap-1"
+                    >
+                      View on Lora
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                        />
+                      </svg>
+                    </a>
+                  )}
                 </div>
-                {activeAddress && (
-                  <a
-                    href={`https://lora.algokit.io/${networkName}/account/${activeAddress}/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 transition flex items-center gap-1"
-                  >
-                    View on Lora
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                      />
-                    </svg>
-                  </a>
-                )}
+
+                <div className="text-sm text-slate-700 dark:text-slate-200">
+                  Network: <span className="font-semibold">{networkName}</span>
+                </div>
               </div>
             </div>
 
             <button
-              onClick={handleDisconnect}
+              onClick={handleLogout}
               className="w-full py-3 rounded-xl font-semibold bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30 transition"
             >
-              Disconnect
+              Log out
             </button>
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Google Sign In (Web3Auth) */}
+            {/* Web3Auth - opens its own modal for social provider selection */}
             {web3AuthWallet && (
               <div className="space-y-3">
                 <button
-                  onClick={() => handleConnect(web3AuthWallet)}
-                  disabled={!!connectingId}
+                  onClick={() => connectWallet(web3AuthWallet)}
+                  disabled={isConnectingAny}
                   className="w-full flex items-center justify-center gap-3 p-4 rounded-xl bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600 hover:border-blue-500 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/20 transition disabled:opacity-60 shadow-sm"
                 >
-                  {/* Google Icon */}
-                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
                     <path
                       fill="#4285F4"
                       d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -293,9 +226,10 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
                     />
                   </svg>
                   <span className="font-semibold text-slate-700 dark:text-slate-200">
-                    {connectingId === web3AuthWallet.id ? 'Connecting…' : 'Continue with Google'}
+                    {connectingKey === WalletId.WEB3AUTH ? 'Connecting…' : 'Continue with Social Login'}
                   </span>
                 </button>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Sign in with Google, GitHub, or other social accounts</p>
               </div>
             )}
 
@@ -312,32 +246,34 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
             {traditionalWallets.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">Algorand Wallets</div>
-                {traditionalWallets.map((w) => (
-                  <button
-                    key={w.id}
-                    onClick={() => handleConnect(w)}
-                    disabled={!!connectingId}
-                    className="w-full flex items-center justify-between gap-4 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:border-teal-500 dark:hover:bg-teal-900/10 transition disabled:opacity-60"
-                  >
-                    <div className="flex items-center gap-3">
-                      {w.metadata?.icon ? (
-                        <img src={w.metadata.icon} alt={w.id} className="w-8 h-8 rounded-lg" />
-                      ) : (
-                        <div className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-slate-700" />
-                      )}
-                      <span className="font-semibold text-slate-900 dark:text-white">{w.metadata?.name ?? w.id}</span>
-                    </div>
-                    <span className="text-sm text-slate-500 dark:text-slate-400">{connectingId === w.id ? 'Connecting…' : 'Connect'}</span>
-                  </button>
-                ))}
+                {traditionalWallets.map((w) => {
+                  const isConnectingThis = connectingKey === w.id
+                  return (
+                    <button
+                      key={w.id}
+                      onClick={() => connectWallet(w)}
+                      disabled={isConnectingAny}
+                      className="w-full flex items-center justify-between gap-4 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:border-teal-500 dark:hover:bg-teal-900/10 transition disabled:opacity-60"
+                    >
+                      <div className="flex items-center gap-3">
+                        {w.metadata?.icon ? (
+                          <img src={w.metadata.icon} alt={w.id} className="w-8 h-8 rounded-lg" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-slate-700" />
+                        )}
+                        <span className="font-semibold text-slate-900 dark:text-white">{w.metadata?.name ?? w.id}</span>
+                      </div>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">{isConnectingThis ? 'Connecting…' : 'Connect'}</span>
+                    </button>
+                  )
+                })}
               </div>
             )}
 
-            {/* Warning if Web3Auth didn't register */}
             {!web3AuthWallet && (
               <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                 <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Google sign-in is not available. Check console for Web3Auth errors.
+                  Social sign-in is not available. Check your Web3Auth Client ID in .env and the browser console.
                 </p>
               </div>
             )}
