@@ -1,10 +1,10 @@
+import { AlgorandClient } from '@algorandfoundation/algokit-utils'
+import { OnSchemaBreak, OnUpdate } from '@algorandfoundation/algokit-utils/types/app'
 import { useWallet } from '@txnlab/use-wallet-react'
 import { useSnackbar } from 'notistack'
 import { useState } from 'react'
-import { HelloWorldFactory } from '../contracts/HelloWorld'
-import { OnSchemaBreak, OnUpdate } from '@algorandfoundation/algokit-utils/types/app'
+import { HelloWorldFactory } from '../../TokenizeRWATemplate-contracts/smart_contracts/artifacts/hello_world/HelloWorldClient'
 import { getAlgodConfigFromViteEnvironment, getIndexerConfigFromViteEnvironment } from '../utils/network/getAlgoClientConfigs'
-import { AlgorandClient } from '@algorandfoundation/algokit-utils'
 
 interface AppCallsInterface {
   openModal: boolean
@@ -23,10 +23,19 @@ const AppCalls = ({ openModal, setModalState }: AppCallsInterface) => {
     algodConfig,
     indexerConfig,
   })
-  algorand.setDefaultSigner(transactionSigner)
+  if (transactionSigner) {
+    // @ts-expect-error - optional API depending on algokit-utils version
+    algorand.setDefaultSigner?.(transactionSigner)
+  }
 
   const sendAppCall = async () => {
     setLoading(true)
+
+    if (!activeAddress || !transactionSigner) {
+      enqueueSnackbar('Please connect a wallet first.', { variant: 'warning' })
+      setLoading(false)
+      return
+    }
 
     // Please note, in typical production scenarios,
     // you wouldn't want to use deploy directly from your frontend.

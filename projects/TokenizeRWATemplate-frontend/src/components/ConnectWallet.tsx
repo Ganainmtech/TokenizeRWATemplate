@@ -1,4 +1,4 @@
-import { useWallet, WalletId, type BaseWallet } from '@txnlab/use-wallet-react'
+import { useWallet, WalletId } from '@txnlab/use-wallet-react'
 import { useMemo, useState } from 'react'
 import { ellipseAddress } from '../utils/ellipseAddress'
 import { getAlgodConfigFromViteEnvironment } from '../utils/network/getAlgoClientConfigs'
@@ -17,7 +17,10 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
 
   // Get network config for Lora link
   const algoConfig = getAlgodConfigFromViteEnvironment()
-  const networkName = useMemo(() => (algoConfig.network === '' ? 'localnet' : algoConfig.network.toLowerCase()), [algoConfig.network])
+  const networkName = useMemo(() => {
+    const n = (algoConfig.network ?? '').toString()
+    return n === '' ? 'localnet' : n.toLowerCase()
+  }, [algoConfig.network])
 
   const visibleWallets = useMemo(() => (wallets ?? []).filter(Boolean), [wallets])
 
@@ -31,7 +34,7 @@ const ConnectWallet = ({ openModal, closeModal }: ConnectWalletProps) => {
   // Capture wallet ID for logout (before disconnect clears it)
   const activeWalletId = activeWallet?.id
 
-  const connectWallet = async (wallet: BaseWallet) => {
+  const connectWallet = async (wallet: any) => {
     setLastError('')
     setConnectingKey(wallet.id)
 

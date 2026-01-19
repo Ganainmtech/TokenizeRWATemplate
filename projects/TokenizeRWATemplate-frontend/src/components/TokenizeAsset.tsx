@@ -1,11 +1,11 @@
 import { AlgorandClient } from '@algorandfoundation/algokit-utils'
+import { useWallet } from '@txnlab/use-wallet-react'
 import { sha512_256 } from 'js-sha512'
 import { useSnackbar } from 'notistack'
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AiOutlineCloudUpload, AiOutlineInfoCircle, AiOutlineLoading3Quarters } from 'react-icons/ai'
 import { BsCoin } from 'react-icons/bs'
 import { getAlgodConfigFromViteEnvironment } from '../utils/network/getAlgoClientConfigs'
-import { useWallet } from '@txnlab/use-wallet-react'
 
 /**
  * Type for created assets stored in browser localStorage
@@ -178,7 +178,7 @@ export default function TokenizeAsset() {
   // ===== use-wallet (Web3Auth OR WalletConnect) =====
   // Use transactionSigner (not signer) - this is the correct property name from use-wallet
   const { transactionSigner, activeAddress } = useWallet()
-  
+
   // Alias for backward compatibility in the code
   const signer = transactionSigner
 
@@ -227,10 +227,7 @@ export default function TokenizeAsset() {
       let apiCallSucceeded = false
 
       try {
-        holding = await algorand.asset.getAccountInformation(
-          activeAddress,
-          BigInt(TESTNET_USDC_ASSET_ID),
-        )
+        holding = await algorand.asset.getAccountInformation(activeAddress, BigInt(TESTNET_USDC_ASSET_ID))
         apiCallSucceeded = true
       } catch (assetApiError: unknown) {
         // API call failed - account is likely not opted in
@@ -343,12 +340,7 @@ export default function TokenizeAsset() {
       // 1. Actually switching TO usdc mode (not just re-render)
       // 2. Blockchain check is complete (status confirmed)
       // 3. Warning hasn't been shown already
-      if (
-        modeChanged &&
-        hasCheckedUsdcOnChain &&
-        !hasShownUsdcWarningRef.current &&
-        usdcStatus === 'not-opted-in'
-      ) {
+      if (modeChanged && hasCheckedUsdcOnChain && !hasShownUsdcWarningRef.current && usdcStatus === 'not-opted-in') {
         enqueueSnackbar('You are not opted in to USDC yet. Please opt in before receiving or sending USDC.', {
           variant: 'info',
         })
@@ -394,7 +386,7 @@ export default function TokenizeAsset() {
       enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
-    
+
     if (!signer) {
       enqueueSnackbar('Wallet signer not available. Please try reconnecting your wallet.', { variant: 'error' })
       return
@@ -529,7 +521,7 @@ export default function TokenizeAsset() {
       enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
-    
+
     if (!signer) {
       enqueueSnackbar('Wallet signer not available. Please try reconnecting your wallet.', { variant: 'error' })
       return
@@ -627,7 +619,7 @@ export default function TokenizeAsset() {
       enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
-    
+
     if (!signer) {
       enqueueSnackbar('Wallet signer not available. Please try reconnecting your wallet.', { variant: 'error' })
       return
@@ -681,7 +673,7 @@ export default function TokenizeAsset() {
           sender: activeAddress,
           signer,
           receiver: receiverAddress,
-          amount: { microAlgo: Number(microAlgos) },
+          amount: algorand.microAlgos(microAlgos),
         })
 
         const txId = (result as { txId?: string }).txId
@@ -811,7 +803,7 @@ export default function TokenizeAsset() {
       enqueueSnackbar('Please connect a wallet or continue with Google first.', { variant: 'warning' })
       return
     }
-    
+
     if (!signer) {
       enqueueSnackbar('Wallet signer not available. Please try reconnecting your wallet.', { variant: 'error' })
       return

@@ -7,7 +7,7 @@ import { ellipseAddress } from './utils/ellipseAddress'
 
 export default function Layout() {
   const [openWalletModal, setOpenWalletModal] = useState(false)
-  const { activeAddress, isActive } = useWallet()
+  const { activeAddress } = useWallet()
 
   const toggleWalletModal = () => setOpenWalletModal(!openWalletModal)
 
