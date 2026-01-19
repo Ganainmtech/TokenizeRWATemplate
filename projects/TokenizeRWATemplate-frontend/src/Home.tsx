@@ -52,43 +52,133 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Features Section */}
-      <div className="bg-slate-50 dark:bg-slate-900 py-20 sm:py-28">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white">How It Works</h2>
+      {/* How It Works */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 sm:pb-20">
+        <div className="flex items-end justify-between gap-6 mb-8">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">How it works</h2>
+            <p className="mt-2 text-slate-600 dark:text-slate-300 max-w-2xl">
+              A clean, end-to-end flow: connect → mint → track → transfer.
+            </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8">
-            {/* Step 1 */}
-            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-8 hover:shadow-lg transition">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 font-bold text-lg mb-4">
+          <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            Ready for TestNet demos
+          </div>
+        </div>
+
+        {/* Steps */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Step 1 */}
+          <div
+            className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/40 backdrop-blur
+                          p-6 hover:shadow-lg hover:shadow-slate-200/40 dark:hover:shadow-black/30 transition"
+          >
+            <div className="flex items-start gap-4">
+              <div
+                className="shrink-0 inline-flex items-center justify-center h-10 w-10 rounded-xl
+                              bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 font-bold"
+              >
                 1
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">Connect Wallet</h3>
-              <p className="text-slate-600 dark:text-slate-300">Use Pera, Defly, Exodus, or KMD on localnet. One click to connect.</p>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Connect Wallet</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Use Pera, Defly, Exodus, or KMD on localnet. One click to connect.
+                </p>
+              </div>
             </div>
 
-            {/* Step 2 */}
-            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-8 hover:shadow-lg transition">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 font-bold text-lg mb-4">
+            <div className="mt-4 h-px bg-slate-100 dark:bg-slate-800" />
+
+            <div className="mt-4 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>Wallet sign-in</span>
+              <span className="group-hover:text-teal-600 dark:group-hover:text-teal-300 transition">Instant</span>
+            </div>
+          </div>
+
+          {/* Step 2 */}
+          <div
+            className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/40 backdrop-blur
+                          p-6 hover:shadow-lg hover:shadow-slate-200/40 dark:hover:shadow-black/30 transition"
+          >
+            <div className="flex items-start gap-4">
+              <div
+                className="shrink-0 inline-flex items-center justify-center h-10 w-10 rounded-xl
+                              bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 font-bold"
+              >
                 2
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">Create ASA</h3>
-              <p className="text-slate-600 dark:text-slate-300">
-                Define asset properties: name, symbol, supply, and optional metadata URL.
-              </p>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Create ASA</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Define asset properties: name, symbol, supply, and optional metadata URL.
+                </p>
+              </div>
             </div>
 
-            {/* Step 3 */}
-            <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-8 hover:shadow-lg transition">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 font-bold text-lg mb-4">
+            <div className="mt-4 h-px bg-slate-100 dark:bg-slate-800" />
+
+            <div className="mt-4 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>Mint on TestNet</span>
+              <span className="group-hover:text-teal-600 dark:group-hover:text-teal-300 transition">Fast</span>
+            </div>
+          </div>
+
+          {/* Step 3 */}
+          <div
+            className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/40 backdrop-blur
+                          p-6 hover:shadow-lg hover:shadow-slate-200/40 dark:hover:shadow-black/30 transition"
+          >
+            <div className="flex items-start gap-4">
+              <div
+                className="shrink-0 inline-flex items-center justify-center h-10 w-10 rounded-xl
+                              bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 font-bold"
+              >
                 3
               </div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3">Track Assets</h3>
-              <p className="text-slate-600 dark:text-slate-300">
-                View your created assets in a local history table (stored in your browser).
-              </p>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Track Assets</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  View your created assets in a local history table (stored in your browser).
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 h-px bg-slate-100 dark:bg-slate-800" />
+
+            <div className="mt-4 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>Local history</span>
+              <span className="group-hover:text-teal-600 dark:group-hover:text-teal-300 transition">Simple</span>
+            </div>
+          </div>
+
+          {/* Step 4 */}
+          <div
+            className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/40 backdrop-blur
+                          p-6 hover:shadow-lg hover:shadow-slate-200/40 dark:hover:shadow-black/30 transition"
+          >
+            <div className="flex items-start gap-4">
+              <div
+                className="shrink-0 inline-flex items-center justify-center h-10 w-10 rounded-xl
+                              bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 font-bold"
+              >
+                4
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Transfer Assets</h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Send ALGO, TestNet USDC, or any ASA using the built-in transfer tool.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 h-px bg-slate-100 dark:bg-slate-800" />
+
+            <div className="mt-4 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>Built-in transfers</span>
+              <span className="group-hover:text-teal-600 dark:group-hover:text-teal-300 transition">All-in-one</span>
             </div>
           </div>
         </div>
