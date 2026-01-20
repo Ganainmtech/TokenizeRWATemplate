@@ -1,3 +1,4 @@
+// Shared Express app (no .listen here)
 import pinataSDK from '@pinata/sdk'
 import cors from 'cors'
 import dotenv from 'dotenv'
@@ -13,7 +14,7 @@ const app = express()
 /**
  * CORS
  * - Allows localhost dev
- * - Allows your main frontend
+ * - Allows your main frontend(s) via ALLOWED_ORIGINS
  * - Allows ANY *.vercel.app (so forks work for non-technical founders)
  *
  * Optional: set ALLOWED_ORIGINS in Vercel env as comma-separated list
@@ -25,8 +26,9 @@ const explicitAllowed = (process.env.ALLOWED_ORIGINS || '')
   .map((s) => s.trim())
   .filter(Boolean)
 
-const isAllowedOrigin = (origin: string) => {
+function isAllowedOrigin(origin: string) {
   // explicitly allowed
+  if (explicitAllowed.includes('*')) return true
   if (explicitAllowed.includes(origin)) return true
 
   // local dev
@@ -37,27 +39,33 @@ const isAllowedOrigin = (origin: string) => {
     const host = new URL(origin).hostname
     if (host.endsWith('.vercel.app')) return true
   } catch {
-    // ignore
+    // ignore bad origins
   }
 
   return false
 }
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // allow server-to-server / curl / same-origin (no Origin header)
-      if (!origin) return cb(null, true)
-      if (isAllowedOrigin(origin)) return cb(null, true)
-      return cb(null, false)
-    },
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  }),
-)
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, cb) => {
+    // allow server-to-server / curl / same-origin (no Origin header)
+    if (!origin) return cb(null, true)
 
-// Handle preflight requests for ALL routes
-app.options('*', cors())
+    if (isAllowedOrigin(origin)) return cb(null, true)
+
+    // IMPORTANT: return an error (not "false") so it's obvious in logs/debugging
+    return cb(new Error(`CORS blocked for origin: ${origin}`))
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+  optionsSuccessStatus: 204,
+}
+
+// Apply CORS to all routes
+app.use(cors(corsOptions))
+
+// Handle preflight requests for ALL routes (with the SAME options)
+app.options('*', cors(corsOptions))
 
 app.use(express.json())
 
@@ -66,6 +74,16 @@ const pinata =
   process.env.PINATA_JWT && process.env.PINATA_JWT.trim().length > 0
     ? new pinataSDK({ pinataJWTKey: process.env.PINATA_JWT })
     : new pinataSDK(process.env.PINATA_API_KEY || '', process.env.PINATA_API_SECRET || '')
+
+// Optional: test credentials at cold start (helps a LOT on Vercel)
+;(async () => {
+  try {
+    const auth = await (pinata as any).testAuthentication?.()
+    console.log('Pinata auth OK:', auth || 'ok')
+  } catch (e) {
+    console.error('Pinata authentication FAILED. Check env vars.', e)
+  }
+})()
 
 // Uploads (multipart/form-data)
 const upload = multer({

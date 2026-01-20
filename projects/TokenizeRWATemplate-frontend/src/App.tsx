@@ -1,4 +1,5 @@
 import { SupportedWallet, WalletId, WalletManager, WalletProvider } from '@txnlab/use-wallet-react'
+import { Analytics } from '@vercel/analytics/next'
 import { SnackbarProvider } from 'notistack'
 import { useMemo } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
@@ -79,6 +80,7 @@ export default function App() {
     <SnackbarProvider maxSnack={3}>
       <WalletProvider manager={walletManager}>
         <BrowserRouter>
+          <Analytics />
           <Routes>
             <Route element={<Layout />}>
               <Route path="/" element={<Home />} />
