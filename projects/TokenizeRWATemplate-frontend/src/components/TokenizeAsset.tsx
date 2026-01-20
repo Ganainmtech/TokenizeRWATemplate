@@ -46,7 +46,12 @@ type TransferMode = 'manual' | 'algo' | 'usdc'
 function resolveBackendBase(): string {
   // 1) Respect explicit env (Vercel or custom)
   const env = import.meta.env.VITE_API_URL?.trim()
-  if (env) return env.replace(/\/$/, '')
+  if (env) {
+    const cleaned = env.replace(/\/$/, '')
+    // If someone pastes "my-backend.vercel.app" (no protocol),
+    // the browser will treat it as a relative path. Force https.
+    return cleaned.startsWith('http://') || cleaned.startsWith('https://') ? cleaned : `https://${cleaned}`
+  }
 
   // 2) Codespaces: convert current host to port 3001
   // e.g. https://abc-5173.app.github.dev -> https://abc-3001.app.github.dev
@@ -602,8 +607,12 @@ export default function TokenizeAsset() {
       })
 
       resetDefaults()
-    } catch (error) {
-      enqueueSnackbar('Failed to tokenize asset (ASA creation failed).', { variant: 'error' })
+    } catch (error: any) {
+      console.error('[ASA create] error:', error)
+
+      const msg = error?.response?.body?.message || error?.response?.text || error?.message || String(error)
+
+      enqueueSnackbar(`ASA creation failed: ${msg}`, { variant: 'error' })
     } finally {
       setLoading(false)
     }

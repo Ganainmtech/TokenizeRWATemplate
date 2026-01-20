@@ -2,7 +2,9 @@
   "name": "nft_mint_server",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=18 <21" },
+  "engines": {
+    "node": ">=18 <21"
+  },
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js"

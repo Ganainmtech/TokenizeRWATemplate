@@ -1,10 +1,11 @@
-import express from 'express'
-import cors from 'cors'
-import multer from 'multer'
+// server.js (ESM) — deployable on Vercel
 import pinataSDK from '@pinata/sdk'
+import cors from 'cors'
 import dotenv from 'dotenv'
-import { Readable } from 'stream'
+import express from 'express'
+import multer from 'multer'
 import path from 'path'
+import { Readable } from 'stream'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -15,33 +16,47 @@ dotenv.config({ path: path.resolve(__dirname, '.env') })
 
 const app = express()
 
-// Allow local + prod (comma-separated in env), or * by default for dev
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*')
-  .split(',')
+/**
+ * CORS
+ * - Allows localhost for local dev
+ * - Allows your main frontend via FRONTEND_ORIGIN
+ */
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.FRONTEND_ORIGIN, // e.g. https://tokenize-rwa-template.vercel.app
+]
+  .filter(Boolean)
   .map((o) => o.trim())
 
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true) // same-origin, curl, Postman
-      if (allowedOrigins.includes('*')) return cb(null, true)
+      // allow server-to-server / curl (no origin)
+      if (!origin) return cb(null, true)
+
       if (allowedOrigins.includes(origin)) return cb(null, true)
 
-      // Allow any frontend on vercel.app (great for forks)
+      // Allow any frontend on vercel.app (great for forks + previews)
       try {
         const host = new URL(origin).hostname
         if (host.endsWith('.vercel.app')) return cb(null, true)
-      } catch (_) {}
+      } catch {
+        // ignore URL parse errors
+      }
 
       return cb(null, false)
     },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: false,
-  })
+  }),
 )
 
-// IMPORTANT: for multipart/form-data, multer populates req.body
-// but JSON parsing is still useful for other endpoints
-app.use(express.json())
+// Preflight for all routes
+app.options('*', cors())
+
+// For non-multipart endpoints (multer handles multipart/form-data)
+app.use(express.json({ limit: '15mb' }))
 
 // Pinata client
 const pinata = process.env.PINATA_JWT
@@ -51,8 +66,12 @@ const pinata = process.env.PINATA_JWT
 // Optional: test credentials at cold start
 ;(async () => {
   try {
-    const auth = await pinata.testAuthentication?.()
-    console.log('Pinata auth OK:', auth || 'ok')
+    if (typeof pinata.testAuthentication === 'function') {
+      await pinata.testAuthentication()
+      console.log('Pinata auth OK')
+    } else {
+      console.log('Pinata SDK loaded (no testAuthentication method)')
+    }
   } catch (e) {
     console.error('Pinata authentication FAILED. Check env vars.', e?.message || e)
   }
@@ -61,18 +80,15 @@ const pinata = process.env.PINATA_JWT
 // health
 app.get('/health', (_req, res) => {
   res.set('Cache-Control', 'no-store')
-  res.json({ ok: true, ts: Date.now() })
+  res.status(200).json({ ok: true, ts: Date.now() })
 })
 
 // uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB safety limit (matches frontend hint)
-  },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 })
 
-// Small helpers
 function safeTrim(v) {
   return typeof v === 'string' ? v.trim() : ''
 }
@@ -91,21 +107,20 @@ app.post('/api/pin-image', upload.single('file'), async (req, res) => {
     const file = req.file
     if (!file) return res.status(400).json({ error: 'No file uploaded' })
 
-    // NEW: read optional fields from multipart form-data (sent by frontend)
+    // Optional multipart fields from frontend
     const metaName = safeTrim(req.body?.metaName) || 'NFT Example'
     const metaDescription = safeTrim(req.body?.metaDescription) || 'This is an unchangeable NFT'
     const properties = safeJsonParse(req.body?.properties, {})
 
     // Pin image
     const stream = Readable.from(file.buffer)
-    // Pinata SDK expects a path/filename sometimes
-    // @ts-ignore
+    // Pinata SDK sometimes expects a .path/filename
     stream.path = file.originalname || 'upload'
 
-    const imageOptions = {
+    const imageResult = await pinata.pinFileToIPFS(stream, {
       pinataMetadata: { name: file.originalname || `${metaName} Image` },
-    }
-    const imageResult = await pinata.pinFileToIPFS(stream, imageOptions)
+    })
+
     const imageUrl = `ipfs://${imageResult.IpfsHash}`
 
     // Pin metadata JSON
@@ -116,18 +131,16 @@ app.post('/api/pin-image', upload.single('file'), async (req, res) => {
       properties,
     }
 
-    const jsonOptions = { pinataMetadata: { name: `${metaName} Metadata` } }
-    const jsonResult = await pinata.pinJSONToIPFS(metadata, jsonOptions)
+    const jsonResult = await pinata.pinJSONToIPFS(metadata, {
+      pinataMetadata: { name: `${metaName} Metadata` },
+    })
+
     const metadataUrl = `ipfs://${jsonResult.IpfsHash}`
 
-    res.status(200).json({ metadataUrl })
+    return res.status(200).json({ metadataUrl })
   } catch (error) {
-    const msg =
-      error?.response?.data?.error ||
-      error?.response?.data ||
-      error?.message ||
-      'Failed to pin to IPFS.'
-    res.status(500).json({ error: msg })
+    const msg = error?.response?.data?.error || error?.response?.data || error?.message || 'Failed to pin to IPFS.'
+    return res.status(500).json({ error: msg })
   }
 })
 
