@@ -13,7 +13,7 @@ No prior blockchain or smart contract experience required. By the end, you'll ha
 
 ## ✨ What This Template Gives You
 
-- ✅ Full-stack Algorand project
+- ✅ Full-stack Algorand project (frontend + backend server - no smart contract logic used)
 - ✅ Simple ASA creation and transferring flow for assets
 - ✅ Web2 & Web3-style logins
 - ✅ TestNet-ready setup
@@ -159,6 +159,13 @@ npm run dev
 
 You can also start the frontend directly using the GitHub Codespaces UI, which is useful for demos and workshops.
 
+## Pro Tip!
+GitHub Codespaces is included with free accounts but comes with a monthly limit of 60 hours. 
+
+To avoid losing your progress, be sure to **commit AND sync your changes regularly** — just like shown in the video demo below — so your updates are saved to your forked repository.
+
+https://github.com/user-attachments/assets/dd452ea1-3070-4718-af34-bea978e208ab
+
 ---
 
 ## 🧠 Final Note (Important for Learners)
@@ -219,9 +226,9 @@ These controls are optional and depend on your use case and trust model.
 ## 📹 Video Guides
 
 Below are videos on:
-- How to connect to TestNet on Pera
-- How to use the Algo Dispenser
-- How to use the USDC Dispenser
+- How to connect to TestNet on [Pera](https://perawallet.app/)
+- How to use the [Algo Dispenser](https://bank.testnet.algorand.network/)
+- How to use the [USDC Dispenser](https://faucet.circle.com/)
 
 ### How to connect to TestNet on Pera Wallet
 
