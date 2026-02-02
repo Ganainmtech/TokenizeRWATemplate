@@ -35,11 +35,13 @@ function isAllowedOrigin(origin) {
 
   try {
     const host = new URL(origin).hostname
-    if (host.endsWith('.vercel.app')) return true
+    return (
+      host.endsWith('.vercel.app') ||
+      host.endsWith('.app.github.dev')
+    )
   } catch {
-    // ignore
+    return false
   }
-  return false
 }
 
 const corsOptions = {
